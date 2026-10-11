@@ -1,11 +1,12 @@
 # vtuber-watchalong-stitcher
 
-Turn a VTuber anime watchalong (同時視聴) stream into a watchable video: the anime plays on
-the left, the streamer on the right, synced to her reactions, with subtitles for both.
+Turn a VTuber anime watchalong (同時視聴) stream into a video you can actually watch: the
+anime plays on the left, the streamer on the right, in sync with her reactions, with
+subtitles for both.
 
 ```
 +-----------------------------+--------+
-|  streamer subs              |        |
+|  her lines (subtitled)      |        |
 +-----------------------------+ stream |
 |                             |  (her  |
 |    anime (with its subs)    | model) |
@@ -13,266 +14,268 @@ the left, the streamer on the right, synced to her reactions, with subtitles for
 +-----------------------------+--------+
 ```
 
-The output is the **whole stream** at the stream's resolution. While an episode plays you
-get the split layout. If she pauses, the anime freezes on that frame. Between episodes (chatting,
-superchats) the original stream is shown full-frame.
+You get the **whole stream** back. While an episode plays you see the layout above; if she
+pauses, the anime freezes too. Before, between and after episodes (chatting, superchats) the
+stream is shown full-screen with her subtitles at the bottom.
 
-## Quick start
+It works with streams that show an on-screen episode timer (`00:12:34` counting up), which
+most watchalongs do. That timer is how the anime gets synced.
 
-You only need Docker. Everything else (ffmpeg, yt-dlp, aria2, tesseract, Whisper) lives in the
-image, so your machine stays clean.
+## 1. Install
 
-1. Install a Docker runtime: [OrbStack](https://orbstack.dev) (lightest on macOS),
-   [Docker Desktop](https://www.docker.com/products/docker-desktop/), or Docker Engine on Linux.
-   - Give it plenty of CPU. Speech-to-text and encoding are CPU-bound.
-2. Clone this repo and run:
+Pick one.
+
+### Docker (recommended)
+
+1. Install Docker: [OrbStack](https://orbstack.dev) (lightest on macOS),
+   [Docker Desktop](https://www.docker.com/products/docker-desktop/), or Docker Engine on
+   Linux. Give it as many CPU cores as you can.
+2. Clone this repo.
+
+Everything else (ffmpeg, downloaders, OCR, speech recognition) is inside the image, which
+builds itself on the first run: a few minutes, plus a 1.6 GB speech model download. You run
+the program as `./watchalong.sh`.
+
+### Everything on your machine
+
+You need:
+
+| Tool | Used for |
+|---|---|
+| Python 3.11 or newer | The program itself. |
+| ffmpeg **built with libass** | Video work and burning in subtitles. |
+| aria2 | Torrent downloads. |
+| tesseract | Reading the on-screen timer. |
+| Deno | Lets yt-dlp get past YouTube's player checks. |
+| Noto Sans CJK font | Japanese text in subtitles. |
+
+**macOS (Homebrew):**
+
+```sh
+brew install ffmpeg-full aria2 tesseract deno
+brew install --cask font-noto-sans-cjk
+# ffmpeg-full isn't put on your PATH automatically, and the plain `ffmpeg` formula has no
+# libass. Add this to your shell profile:
+export PATH="$(brew --prefix ffmpeg-full)/bin:$PATH"
+```
+
+**Debian / Ubuntu:**
+
+```sh
+sudo apt install ffmpeg aria2 tesseract-ocr fonts-noto-cjk python3-venv
+curl -fsSL https://deno.land/install.sh | sh
+```
+
+Windows isn't tested; use WSL with the Debian/Ubuntu steps.
+
+Then, in the repo folder:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+You run the program as `watchalong` (activate the venv first in each new terminal). It
+takes exactly the same arguments and job files as `./watchalong.sh`. If a tool is missing it
+tells you which one on startup.
+
+### English subtitles: Claude Code
+
+English translation uses [Claude Code](https://claude.com/claude-code) with your Claude Pro
+or Max plan; nothing is billed separately.
+
+- **Docker:** run `claude setup-token` on your machine and put the token in a file named
+  `.env` in the repo folder (see `.env.example`):
+  ```
+  CLAUDE_CODE_OAUTH_TOKEN=...
+  ```
+- **On your machine:** install Claude Code and log in as usual.
+
+Without Claude Code, use `subs japanese` (her transcript) or `subs none`.
+
+## 2. Run
+
+Results land in `data/output/`. There are two ways to say what to make.
+
+### On the command line
+
+The stream first, then the episodes **in the order she watches them**, then any settings:
 
 ```sh
 ./watchalong.sh https://www.youtube.com/live/eFYByyw5AJc \
-  https://nyaa.si/view/1325663 https://nyaa.si/view/1329078 https://nyaa.si/view/1332706 \
-  https://nyaa.si/view/1336130 https://nyaa.si/view/1339458 https://nyaa.si/view/1342987
+  https://nyaa.si/view/1325663 https://nyaa.si/view/1329078 \
+  --subs japanese --ratio 0.22
 ```
 
-The result lands in `data/output/<video-id>.mp4`. The first run builds the image, which takes a
-few minutes. It also downloads the speech model (about 1.6 GB, cached in a Docker volume).
+### With a job file (recommended)
 
-List anime sources **in the order she watches them**. A batch torrent or a folder counts as
-all of its episodes, in filename order. Each source can be any of these:
-- a nyaa.si page
-- a `.torrent` URL
-- a magnet link
-- a local file or folder
+A text file with the stream, its episodes and your settings. Easier to edit and re-run,
+and it can hold many streams.
 
-### Job files: local files, mixed sources, several streams
-
-Instead of arguments you can describe the work in a text file and run
-`./watchalong.sh --job jobs/pekora-mushoku-tensei.txt`:
-
-```
-stream  https://www.youtube.com/live/eFYByyw5AJc
-episode https://nyaa.si/view/1325663          # a link...
-episode ~/anime/Mushoku Tensei - 02.mkv       # ...or a local file
-episode ./mushoku-batch/                       # ...or a folder of episodes
-
-stream  ~/vods/another-watchalong.mp4          # a second job in the same file
-episode magnet:?xt=urn:btih:...
+```sh
+cp example-job.txt jobs/my-show.txt     # every setting, with its default, explained
+# edit jobs/my-show.txt
+./watchalong.sh --job jobs/my-show.txt
 ```
 
-- Each `stream` line starts a job. The `episode` lines below it are that stream's episodes,
-  in watch order.
-- Relative paths are relative to the job file.
-- Many releases open with a few seconds of distributor bumper (e.g. the Funimation logo)
-  before the episode, while her timer starts at the episode itself. The bumper is detected
-  automatically by comparing the starts of the episodes; it needs at least two episodes from the
-  same release. To set it by hand, end an episode line with `skip=SECONDS`
-  (`episode https://nyaa.si/view/1325663  skip=7`), or pass `--anime-skip SECONDS` for all
-  episodes.
-- `vocab` lines list names and words she uses, as `Japanese=English` (English optional),
-  separated by commas: `vocab ぺこら=Pekora, 野うさぎ=nousagi`. See
-  [Names and vocabulary](#names-and-vocabulary).
-- Local streams and episodes skip downloading. If a local episode has a subtitle file next to
-  it with the same name (`.ass`, `.srt`, `.vtt`), that file is used instead of the embedded subtitles.
-
-- Any [option](#options) can be a line too, by its long name without the dashes:
-  `ratio 0.22`, `timer-roi 1700,40,200,60`, `no-duck`. Lines before the first `stream` are
-  defaults for every job in the file; lines inside a job apply to that job only.
-
-`watchalong.sh` mounts your home folder (and `/Volumes`) read-only into the container at
-the same paths, so local paths work as-is.
-
-### Large batches
+[`example-job.txt`](example-job.txt) lists every setting with its default value and a short
+explanation; change what you need. The format:
 
 ```
-# batch.txt: defaults for every job below
-translator   claude-code
-cleanup      render
+subs     english                  # settings at the top apply to every stream in the file
 
 stream   https://www.youtube.com/live/eFYByyw5AJc
-name     pekora-mushoku-s1e01-06        # output file name (default: the video id)
 episode  https://nyaa.si/view/1325663
-episode  https://nyaa.si/view/1329078
+episode  ~/anime/Mushoku Tensei - 02.mkv
 vocab    ぺこら=Pekora, 野うさぎ=nousagi
 
-stream   https://www.youtube.com/live/AAAAAAAAAAA
-name     marine-frieren-01
-episode  ~/anime/Frieren/
-ratio    0.22                           # this job only
-timer-roi 1700,40,200,60
+stream   ~/vods/another-watchalong.mp4    # a second stream
+episode  ~/anime/Some Show/
+ratio    0.22                             # a setting for this stream only
 ```
 
-```sh
-./watchalong.sh --job batch.txt --dry-run   # check every job first
-./watchalong.sh --job batch.txt
-./watchalong.sh --job jobs/                 # every *.txt in the folder, in name order
-```
+- Each setting is a command-line option without the dashes: `--ratio 0.22` → `ratio 0.22`.
+- A flag on the command line overrides the file for that run:
+  `./watchalong.sh --job jobs/my-show.txt --range 0:15:00-0:18:00`.
+- `jobs/` is ignored by git, so your job files stay yours.
 
-- **Precedence:** a job's own lines, then the file's defaults, then the command line. A flag
-  on the command line is the fallback for every job.
-- **Failures stay contained.** A job that fails (bad option, download error, no timer found) is
-  logged and the next one starts. At the end a summary lists every job as done, skipped or
-  failed with the reason, and the exit status is 1 if any failed. Each job's log is in
-  `data/logs/<name>.log`.
-- **Finished jobs are skipped.** A job is skipped when its output file already exists, so after
-  fixing a failure you can re-run the same file. `--force` redoes them.
-- **`--dry-run`** reports every problem before anything is downloaded: unknown keys, bad option
-  values, missing local files, two jobs writing the same output file.
-- **Disk:** each job keeps about 10 GB of downloads and caches unless `cleanup` says
-  otherwise. `render` deletes the render pieces (the bulk of it); `downloads` also deletes the
-  downloaded stream and episodes; `all` deletes the job's whole work folder, including the
-  transcript and translation caches. Local files are never touched.
-- **Unattended translation** with `claude-code` inside Docker needs `CLAUDE_CODE_OAUTH_TOKEN` in
-  `.env` (see [Translation with Claude Code](#translation-with-claude-code)).
+**Many streams at once:** put several `stream` blocks in one file, or run a whole folder with
+`--job jobs/`. Check everything first with `--dry-run` (it downloads nothing).
 
-### Quick preview first
+- Jobs run one after another. If one fails, the rest still run, and a summary at the end
+  shows what finished, what was skipped and what failed and why.
+- Jobs whose output already exists are skipped, so after fixing a problem just run the same
+  command again. `--force` redoes them.
+- Each job's log is in `data/logs/<name>.log`.
+- Each finished job leaves about 10 GB of working files unless you set `cleanup`: `render`
+  frees most of it, `downloads` also deletes the downloaded stream and episodes, `all`
+  keeps only the output video.
 
-Rendering 2+ hours of 1080p60 takes a while. To check sync and layout on a few minutes
-first:
+Local files can be anywhere: your home folder, an external drive, `/mnt/media`. Use
+normal paths, absolute, relative or with `~`. With Docker, `watchalong.sh` shares just the
+folders your command and job files point to, read-only, and prints each one it shares.
 
-```sh
-./watchalong.sh <stream> <anime...> --range 0:15:00-0:18:00 --no-asr
-```
+## 3. Video sources
 
-Downloads, the timer scan, and transcripts are all cached in `data/work/<video-id>/`, so
-re-running with different options only redoes what changed.
+The stream and the episodes can each be:
 
-## Options
-
-| Flag | Default | |
+| Source | Example | What happens |
 |---|---|---|
-| `--job FILE\|DIR` | | Read streams and episodes from a job file, or every `*.txt` in a folder, instead of arguments. |
-| `--dry-run` | | Check every job and exit without running anything. |
-| `--force` | | Run jobs whose output already exists. |
-| `--name` | video id | Output file name, without `.mp4`. |
-| `--cleanup` | `none` | After a job succeeds, delete `render` pieces, `downloads` too, or `all` of its work folder. |
-| `--ratio` | `0.25` | Share of the width for the streamer strip. Try 0.2–0.3. |
-| `--crop-offset` | `0` | Shift the strip's crop right (+) or left (−) of center, in pixels. |
-| `--range START-END` | whole stream | Render only part of the stream. |
-| `--no-asr` | | Skip speech-to-text (no streamer subtitles). |
-| `--no-render` | | Stop after writing her subtitles to `data/work/<id>/vtuber.ass`. Use it to check subs before a long render. |
-| `--asr-model` | `large-v3-turbo` | Any faster-whisper model. `large-v3` is slower and a bit more accurate. |
-| `--vocab TERMS` | | Names and words for the translator, e.g. `'ぺこら=Pekora, 野うさぎ=nousagi'`. Repeatable. |
-| `--no-auto-vocab` | | Don't ask Claude Code for the anime's names and terms. |
-| `--translator` | `none` | `claude-code` translates with your Claude Pro/Max subscription (see below). `none` burns her Japanese transcript. `anthropic`, `openai` and `gemini` are placeholders, not implemented yet. |
-| `--anime-skip` | `auto` | Seconds of distributor bumper before each episode, or `auto` to detect it. |
-| `--timer-roi X,Y,W,H` | auto | Timer position, if auto-detection fails. |
-| `--render-jobs` | cores / 3 | Pieces rendered in parallel. |
-| `--preset`, `--crf` | `veryfast`, `20` | x264 speed and quality. |
-| `--anime-volume`, `--voice-volume` | `0.8`, `1.0` | Mix levels. |
-| `--no-duck` | | Don't lower the anime while she talks. |
-| `--cookies FILE` | | cookies.txt for members-only streams (put it under `data/`). |
+| YouTube link | `https://www.youtube.com/live/eFYByyw5AJc` | Downloaded with yt-dlp. For episodes, a playlist link counts as all of its videos, in playlist order. |
+| nyaa.si page, `.torrent` link or magnet | `https://nyaa.si/view/1325663` | Downloaded as a torrent. A batch torrent counts as all of its episodes (a stream torrent must hold one video). |
+| Local video file | `~/vods/stream.mp4` | Used in place. |
+| Local folder (episodes only) | `~/anime/Some Show/` | Every video in it, in filename order. |
 
-### Names and vocabulary
+Episodes need their subtitles **in the video**: burned into the picture (as on YouTube), or
+as a subtitle track (as in most fansub and simulcast `.mkv` releases, which are burned in
+for you). A subtitle file next to a local episode with the same name (`.ass`, `.srt`,
+`.vtt`) works too.
 
-Speech recognition can't know names it has never heard, so it writes them phonetically
-(無職転生 came out as むしろくてんせえ). The vocabulary list is given to the translator as a
-glossary, so it can recognize the misheard names and render them consistently.
+Many torrent releases start with a few seconds of distributor logo that the stream didn't
+show. That's detected and cut automatically when you give two or more episodes of the same
+release; otherwise end the episode line with `skip=SECONDS`.
 
-It is deliberately not given to Whisper as hotwords: that made it hallucinate the words
-into unrelated lines (ぺこいつの現実…) and, over a long stream, skip minutes of speech.
+## 4. Subtitles for the streamer
 
-Sources, merged in order:
-1. `vocab` lines in the job file. These are a good place for the streamer's own terms: her name,
-   her fans' name, her catchphrases.
-2. `--vocab` on the command line.
-3. **Automatic:** if the `claude` CLI is logged in, Claude Code reads the anime's English
-   subtitles once and lists its characters, places and terms with their Japanese spellings
-   (cached in `data/work/<id>/vocab-auto-*.json`, which you can edit). Turn it off with
-   `--no-auto-vocab`.
-
-Changing the vocabulary re-runs translation only.
-
-### Translation with Claude Code
-
-`--translator claude-code` runs the Claude Code CLI (installed in the image) headless, so it
-uses your Claude Pro/Max plan's usage instead of API billing. A 3-hour stream is about 15
-requests. Each request also gets the anime's English subtitles from the same moment, so
-character names come out right and short reactions make sense.
-
-1. On your machine, run `claude setup-token` and copy the token.
-2. Put it in `.env` (see `.env.example`): `CLAUDE_CODE_OAUTH_TOKEN=...`
-3. Run with `--translator claude-code`. Optionally set `WATCHALONG_CLAUDE_MODEL=sonnet` or `opus`.
-
-The translation is cached, so later re-renders don't use the subscription again.
-
-## How it works
-
-1. **Download.** yt-dlp fetches the stream (H.264, ≤1080p) and aria2 fetches the torrents.
-2. **Anime subtitles.** The English ASS track and its embedded fonts are extracted from each MKV.
-   - Distributor bumpers at the start of each episode are found by comparing episodes: frames shared
-     with other episodes' openings are bumper, and the episode starts at its first unique frame.
-3. **Sync.** The stream shows an `HH:MM:SS` timer that counts up from zero for each episode.
-   - The timer is located by OCR'ing frames across the stream.
-   - That region is then read about twice a second for the whole stream with tesseract.
-   - From the readings, the timeline is built:
-     - **play:** the timer ticks, so `anime time = stream time − offset`.
-     - **pause:** the timer is frozen mid-episode.
-     - **new episode:** the timer resets to zero.
-     - **full:** anything else.
-   - Offsets come out with sub-second precision (see `watchalong/align.py`).
-   - The number of episodes found must match the number of anime files. If it doesn't, the run
-     stops and prints what it found, so it never produces a silently wrong video.
-4. **Speech-to-text.** faster-whisper transcribes her voice (Japanese) on the CPU, with voice
-   activity detection, in independent ~5 minute chunks cut at quiet moments (one long pass
-   can derail and drop minutes of speech; chunks also make an interrupted run resumable).
-   - Subtitle lines are timed from **word-level timestamps**, so a line appears when she starts
-     talking and disappears about 0.4 s after she stops.
-   - Long lines split at punctuation.
-   - The raw word timings are cached, so line timing can be retuned (`watchalong/asr.py`)
-     without transcribing again.
-5. **Translation.** This goes through a provider interface (`watchalong/translate.py`). Lines are sent in batches with the anime dialogue on screen at the time as context.
-6. **Render.**
-   - The anime subs are burned at the anime's native resolution, so fansub typesetting survives.
-   - The anime is then scaled into the panel, the strip is cropped from the center of the stream,
-     and her subs are burned on top.
-   - Audio mixes her voice and the anime, ducking the anime while she talks.
-   - Rendering happens in pieces of at most 5 minutes that are joined losslessly, so an interrupted
-     render resumes.
-
-## Dependencies
-
-Everything is installed in the Docker image (`Dockerfile`):
-
-| What | Why |
+| `subs` | What you get |
 |---|---|
-| Python 3.12 (`python:3.12-slim-trixie`) | Runtime. |
-| ffmpeg with libass (Debian trixie) | Decoding, compositing, subtitle burning, encoding. |
-| yt-dlp + Deno | YouTube download. Deno solves YouTube's JS challenges. |
-| aria2 | BitTorrent downloads. |
-| tesseract-ocr | Reading the on-screen timer. |
-| faster-whisper (CTranslate2) | Japanese speech-to-text. |
-| fonts-noto-cjk | Font for Japanese subtitles. |
+| `english` (default) | Her lines translated to English. The translator also sees the anime's dialogue from the same moment, so names and reactions make sense. Needs Claude Code. |
+| `japanese` | Her lines as a Japanese transcript. |
+| `none` | No subtitles for her (also the fastest: speech recognition is skipped). |
 
-Python packages are listed in `pyproject.toml`. To pick up a newer yt-dlp after YouTube
-changes something, run `docker compose build --no-cache`.
+**Names:** speech recognition spells names it doesn't know phonetically. With `subs english`
+the translator gets a vocabulary list to fix them: your `vocab` lines (her name, her fans'
+name, catchphrases) plus the anime's characters and places, looked up automatically
+(`no-auto-vocab` turns that off).
 
-### Running without Docker
+## 5. Models
 
-You need Python ≥ 3.11 and the tools above on your `PATH`. Note that ffmpeg must be built with
-libass. On macOS Homebrew that means `ffmpeg-full`, not `ffmpeg`. Then:
+| Setting | Default | Choices |
+|---|---|---|
+| `asr-model` | `large-v3-turbo` | Speech recognition (faster-whisper): `large-v3` is slower and slightly better; `medium`, `small` are faster and worse. |
+| `translator` | `claude-code` | Who translates `english` subs. |
+| `translate-model` | Claude Code's default | `sonnet`, `opus`, `haiku`, or a full model name. |
+
+Changing a model only redoes the step that uses it; everything else is reused.
+
+## All settings
+
+Every setting works on the command line (`--name value`) and in job files (`name value`).
+
+| Setting | Default | |
+|---|---|---|
+| `subs` | `english` | `none`, `japanese` or `english`, see [Subtitles](#4-subtitles-for-the-streamer). |
+| `asr-model`, `translator`, `translate-model` | | See [Models](#5-models). |
+| `vocab` | | Names and words for the translator, `Japanese=English, ...`. |
+| `no-auto-vocab` | off | Don't look up the anime's names automatically. |
+| `ratio` | `0.25` | Width of the streamer strip, as a share of the video. Try 0.2–0.3. |
+| `crop-offset` | `0` | Move the strip's crop right (+) or left (−), in pixels, if she isn't centered. |
+| `anime-volume`, `voice-volume` | `0.8`, `1.0` | Mix levels. |
+| `no-duck` | off | Don't lower the anime's volume while she talks. |
+| `anime-skip` | `auto` | Seconds of distributor logo before each episode, or `auto`. |
+| `timer-roi` | auto | Where the timer is (`x,y,width,height` in pixels), if it isn't found. |
+| `range` | whole stream | Only make this part, e.g. `0:15:00-0:18:00`. |
+| `no-render` | off | Stop once her subtitles are written (`data/work/<id>/vtuber.ass`). |
+| `preset`, `crf` | `veryfast`, `20` | Encoding speed and quality (lower crf = better, bigger). |
+| `name` | the video's id | Output file name, without `.mp4`. |
+| `cleanup` | `none` | After a job, delete `render` pieces, `downloads` too, or `all` working files. |
+| `cookies` | | YouTube cookies file, for members-only streams. |
+| `render-jobs` | cores / 3 | How many video pieces render at once. |
+| `workers` | all cores | Parallel timer readers. |
+| `--job` | | A job file, or a folder of them. Command line only. |
+| `--dry-run` | | Check everything and stop. Command line only. |
+| `--force` | | Redo jobs whose output exists. |
+
+## Checking before a long render
 
 ```sh
-pip install -e .
-watchalong <stream> <anime...>
+# a few minutes of video, to check sync and layout (fast, no subtitles)
+./watchalong.sh --job jobs/my-show.txt --range 0:15:00-0:18:00 --subs none
+
+# subtitles only, to read them before rendering anything
+./watchalong.sh --job jobs/my-show.txt --no-render
 ```
 
-## Performance
+Downloads, sync, transcripts and translations are all saved, so the full run afterwards
+only does the remaining work.
 
-Expect the following on a recent 10-core laptop inside Docker (CPU only; Docker on macOS can't use the GPU):
+## How long it takes
 
-- Timer scan: about 5–15 min.
-- Speech-to-text: about 20–40 min for a 3-hour stream with `large-v3-turbo`.
-- Render: several times faster than real-time with `--preset veryfast` (pieces render in parallel).
+On a recent 10-core laptop, for a 3-hour stream (after downloads):
 
-## Development
+| Step | Time |
+|---|---|
+| Finding and reading the timer | 5–15 min |
+| Speech recognition | 20–40 min |
+| Translation | 2–3 min |
+| Rendering | about 45 min |
 
-```sh
-python -m unittest discover tests   # alignment logic, no external tools needed
-```
+Keep the computer awake: on macOS sleep pauses everything. Run it as
+`caffeinate -s ./watchalong.sh ...`. If it's interrupted anyway, run the same command again;
+it picks up where it stopped.
 
-## Notes
+## Troubleshooting
 
-- **Personal use only.** The output contains the anime itself, so don't upload it.
-- **Members-only streams:** export your YouTube cookies to `data/cookies.txt` and pass
-  `--cookies /data/cookies.txt`.
-- **Changing an episode's source** (e.g. a torrent with no seeders): edit the link and re-run.
-  That episode is re-downloaded. Everything else stays cached.
+- **"couldn't find an on-screen timer"**: find the timer's position in a screenshot of the
+  stream and set `timer-roi x,y,width,height`.
+- **"sync failed" / the number of episodes doesn't match**: the run stops instead of making a
+  wrong video. Check that the episodes are listed in the order she watched them and that none
+  is missing or extra. The message shows what it found in the stream.
+- **She reacts a few seconds before things happen**: the episode file starts with a logo the
+  stream didn't have and it wasn't detected (e.g. only one episode). Add `skip=SECONDS` to the
+  episode line.
+- **The strip cuts off her model**: adjust `crop-offset` and `ratio`, checking with a short
+  `range` preview.
+- **A torrent has no seeders**: swap the link for another release and re-run; only that
+  episode is downloaded again.
+- **Members-only stream**: export your YouTube cookies to `data/cookies.txt` and set
+  `cookies /data/cookies.txt` (Docker) or `cookies data/cookies.txt` (on your machine).
+- **YouTube downloads suddenly fail**: update yt-dlp: `docker compose build --no-cache`
+  (Docker) or `pip install -U yt-dlp` (on your machine).
+- **English translation fails in Docker**: the token in `.env` is missing or expired; run
+  `claude setup-token` again.
+
+## Personal use only
+
+The output contains the anime itself. Watch it yourself; don't upload it.

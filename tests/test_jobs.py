@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from watchalong.download import _is_url, _torrent_source, stream_id
 from watchalong.jobs import parse_job_file
 
 
@@ -69,6 +70,17 @@ class JobFileTest(unittest.TestCase):
                      "stream https://x.y/z\nfoo bar\n"):
             with self.assertRaises(SystemExit, msg=text):
                 parse_job_file(self.write(text))
+
+
+class SourcesTest(unittest.TestCase):
+    def test_source_kinds(self):
+        self.assertEqual(_torrent_source("https://nyaa.si/view/1325663"),
+                         "https://nyaa.si/download/1325663.torrent")
+        self.assertTrue(_torrent_source("magnet:?xt=urn:btih:abc"))
+        self.assertIsNone(_torrent_source("https://www.youtube.com/watch?v=eFYByyw5AJc"))
+        self.assertTrue(_is_url("https://www.youtube.com/playlist?list=PL123"))
+        self.assertEqual(stream_id("https://www.youtube.com/live/eFYByyw5AJc"), "eFYByyw5AJc")
+        self.assertEqual(stream_id("https://nyaa.si/view/1325663"), "nyaa-1325663")
 
 
 if __name__ == "__main__":

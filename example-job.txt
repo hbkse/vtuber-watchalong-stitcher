@@ -1,0 +1,68 @@
+# Example job file. Copy it, edit it, and run it:
+#
+#   cp example-job.txt jobs/my-show.txt
+#   ./watchalong.sh --job jobs/my-show.txt
+#
+# The settings below apply to every stream in the file and show the default values, so
+# change only what you need. A setting can also go under one `stream` to apply to that
+# stream only. A flag on the command line (e.g. --range 0:15:00-0:18:00) overrides the
+# file for that run. Lines starting with # are comments; settings that are commented out
+# are off by default: remove the # to use them.
+
+# ---- The streamer's subtitles ----
+subs             english          # none | japanese (her words, transcribed) | english (translated)
+asr-model        large-v3-turbo   # speech recognition model: large-v3 (slower, slightly better),
+                                  #   medium or small (faster, worse)
+translator       claude-code      # who translates english subs (needs Claude Code, see README)
+# translate-model sonnet          # translation model: sonnet, opus, haiku or a full model name
+                                  #   (default: Claude Code's default)
+# no-auto-vocab                   # don't look up the anime's character names automatically
+
+# ---- Layout ----
+ratio            0.25             # width of the streamer strip, as a share of the video
+crop-offset      0                # move the strip's crop right (+) or left (-), in pixels
+
+# ---- Audio ----
+anime-volume     0.8
+voice-volume     1.0
+# no-duck                         # don't lower the anime while she talks
+
+# ---- Sync ----
+anime-skip       auto             # seconds of distributor logo before each episode, or auto
+# timer-roi      1700,40,200,60   # where the on-screen timer is (x,y,width,height in pixels),
+                                  #   only if it isn't found automatically
+
+# ---- Output ----
+preset           veryfast         # encoding speed: ultrafast ... veryslow (slower = smaller file)
+crf              20               # quality: lower is better and bigger; 18-23 is sensible
+cleanup          none             # after a stream is done, delete: none | render | downloads | all
+# range          0:15:00-0:18:00  # only make this part of the stream (for a quick check)
+# no-render                       # stop after writing the subtitles, don't make the video
+# cookies        /data/cookies.txt   # YouTube cookies, for members-only streams
+
+# ---- Streams ----
+# stream   the watchalong: a YouTube link, a torrent (nyaa page, .torrent link, magnet) or a
+#          local video file. Starts a new job; everything below it belongs to that job.
+# episode  one per line, in the order she watches them: a torrent, a YouTube link (a
+#          playlist counts as all of its videos), a local file, or a folder of episodes.
+#          The anime's subtitles must be in the video: burned in, or as a subtitle track.
+#          End the line with skip=SECONDS to cut a distributor logo by hand.
+# vocab    names and words she says, as Japanese=English, so the translation gets them right.
+# name     output file name (default: the stream's video id).
+
+stream   https://www.youtube.com/live/eFYByyw5AJc
+# name   pekora-mushoku-tensei
+episode  https://nyaa.si/view/1325663   # [EMBER] Mushoku Tensei S01E01
+episode  https://nyaa.si/view/1329078   # [EMBER] S01E02
+episode  https://nyaa.si/view/1332706   # [EMBER] S01E03
+episode  https://nyaa.si/view/1336130   # [EMBER] S01E04
+episode  https://nyaa.si/view/1339458   # [EMBER] S01E05
+episode  https://nyaa.si/view/1342865   # [SubsPlease] 06
+vocab    ぺこら=Pekora, ぺこーら=Pekora, 兎田ぺこら=Usada Pekora, ぺこ=peko, 野うさぎ=nousagi
+vocab    ホロライブ=hololive, 同時視聴=watchalong, 初見=first watch
+
+# More streams can follow, each starting with its own `stream` line:
+#
+# stream   ~/vods/another-watchalong.mp4
+# episode  ~/anime/Some Show/          # a folder of episodes
+# ratio    0.22                        # this stream only

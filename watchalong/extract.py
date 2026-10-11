@@ -50,7 +50,8 @@ def extract_subs(video: Path, dest: Path) -> AnimeSubs:
         log.info("using subtitle file %s", sidecar.name)
         run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", sidecar, ass])
     elif stream is None:
-        log.warning("%s has no text subtitle track; anime will be rendered without subs", video.name)
+        # Normal for YouTube uploads and hardsubbed releases: the subs are part of the picture.
+        log.info("%s has no subtitle track; assuming its subtitles are burned in", video.name)
     else:
         run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", video,
              "-map", f"0:{stream['index']}", ass])

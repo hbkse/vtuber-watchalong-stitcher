@@ -69,13 +69,20 @@ def build_parser() -> _Parser:
     g.add_argument("--range", metavar="START-END",
                    help="only render this part of the stream, e.g. 0:30:00-0:33:00 (quick previews)")
     g = p.add_argument_group("subtitles")
-    g.add_argument("--no-asr", action="store_true", help="skip speech-to-text (no streamer subs)")
+    g.add_argument("--subs", default="english", choices=SUBS,
+                   help="the streamer's subtitles: none, japanese (her transcript), or english "
+                        "(translated; default)")
     g.add_argument("--no-render", action="store_true",
                    help="stop after writing the streamer's subtitles (data/work/<id>/vtuber.ass)")
     g.add_argument("--asr-model", default="large-v3-turbo",
-                   help="faster-whisper model (default large-v3-turbo; large-v3 is slower, more accurate)")
-    g.add_argument("--translator", default="none", choices=sorted(TRANSLATORS),
-                   help="translation provider for the streamer's lines (default none = Japanese)")
+                   help="speech recognition model, any faster-whisper model (default large-v3-turbo; "
+                        "large-v3 is slower, slightly more accurate; medium/small are faster, worse)")
+    g.add_argument("--translator", default="claude-code",
+                   choices=sorted(n for n, t in TRANSLATORS.items() if t.implemented and n != "none"),
+                   help="translation provider for --subs english (default claude-code)")
+    g.add_argument("--translate-model",
+                   help="model for the translator; for claude-code: sonnet, opus, haiku or a full "
+                        "model name (default: Claude Code's default)")
     g.add_argument("--vocab", action="append", default=[], metavar="TERMS",
                    help="names/terms for the translator, e.g. 'ぺこら=Pekora, 野うさぎ=nousagi' "
                         "(repeatable; adds to the job file's)")
@@ -106,6 +113,7 @@ def build_parser() -> _Parser:
 
 
 CLEANUP = ("none", "render", "downloads", "all")
+SUBS = ("none", "japanese", "english")
 _NOT_IN_JOB_FILES = {"help", "job", "dry-run", "vocab"}  # vocab has its own job file syntax
 
 
@@ -157,11 +165,11 @@ def plan_jobs(parser, argv, args) -> list[Plan]:
             plans.append(Plan(None, None, None, str(f), "failed", str(e)))
             continue
         for job in jobs:
-            # Later options win: command line, then the file's defaults, then the job's own.
+            # Later options win: the file's defaults, then the job's own, then the command line.
             extra = [f"--{k}={v}" if v is not None else f"--{k}" for k, v in job.options]
             parser.strict = True
             try:
-                jargs = parser.parse_args(argv + extra)
+                jargs = parser.parse_args(extra + argv)
             except OptionError as e:
                 plans.append(Plan(job, None, None, job.where, "failed", str(e)))
                 continue
@@ -177,8 +185,10 @@ def plan_jobs(parser, argv, args) -> list[Plan]:
             p.status, p.reason = "failed", f"same output as {seen[p.out]}: {p.out.name} (set name)"
         else:
             seen[p.out] = p.label
-        if p.status == "pending" and p.args.translator == "claude-code" and not shutil.which("claude"):
-            p.status, p.reason = "failed", "translator claude-code needs the claude CLI"
+        if (p.status == "pending" and p.args.subs == "english" and p.args.translator == "claude-code"
+                and not shutil.which("claude")):
+            p.status, p.reason = "failed", ("english subs need the claude CLI (Claude Code); "
+                                            "install it, or set subs japanese")
     return plans
 
 
@@ -206,7 +216,8 @@ def main(argv=None) -> int:
     if any(p.status == "pending" for p in plans):
         require_tools("ffmpeg", "ffprobe", "yt-dlp", "aria2c", "tesseract")
         if not has_filter("subtitles"):
-            raise SystemExit("this ffmpeg build has no 'subtitles' filter (libass). Use the Docker image.")
+            raise SystemExit("this ffmpeg build has no 'subtitles' filter (libass). On macOS install "
+                             "ffmpeg-full and put it first on PATH (README: Without Docker), or use Docker.")
     todo = [p for p in plans if p.status == "pending"]
     for i, p in enumerate(todo, 1):
         if len(plans) > 1:
@@ -257,7 +268,7 @@ def run_job(job: Job, args, out: Path) -> None:
 
     log.info("== 1/6 downloads")
     stream = download_stream(job.stream, work / "stream", args.cookies).resolve()
-    groups = download_anime(job.episodes, work / "anime-src")
+    groups = download_anime(job.episodes, work / "anime-src", args.cookies)
     videos = [v.resolve() for g in groups for v in g]
     info = probe(stream)
     log.info("stream %dx%d @ %s fps, %s; %d anime files", info.width, info.height, info.fps,
@@ -307,10 +318,10 @@ def run_job(job: Job, args, out: Path) -> None:
     layout = Layout(info.width, info.height, args.ratio, args.crop_offset)
 
     vt_ass = None
-    if not args.no_asr:
+    if args.subs != "none":
         vt_ass = streamer_subs(work, stream, job, args, span, timeline, episodes, layout)
     else:
-        log.info("== 4/6, 5/6 skipped (--no-asr)")
+        log.info("== 4/6, 5/6 skipped (subs none)")
 
     if args.no_render:
         log.info("== 6/6 skipped (--no-render)")
@@ -358,14 +369,18 @@ def streamer_subs(work, stream, job, args, span, timeline, episodes, layout) -> 
         title = read_json(info_json).get("title", "")
     ctx = TranslationContext(stream_title=title, anime_dialogue=anime_dialogue(
         timeline, [work / e.subs if e.subs else None for e in episodes]))
-    translator = get_translator(args.translator)
+    english = args.subs == "english"
+    translator = get_translator(args.translator if english else "none", args.translate_model)
 
-    vocab = list(job.vocab) + [v for text in args.vocab for v in parse_vocab(text)]
-    if not args.no_auto_vocab:
-        vocab += [v for v in auto_vocab(work, title, episodes, ctx) if v[0] not in {ja for ja, _ in vocab}]
+    vocab = []  # only the translator uses it
+    if english:
+        vocab = list(job.vocab) + [v for text in args.vocab for v in parse_vocab(text)]
+        if not args.no_auto_vocab:
+            known = {ja for ja, _ in vocab}
+            vocab += [v for v in auto_vocab(work, title, episodes, ctx, args.translate_model) if v[0] not in known]
+        if vocab:
+            log.info("vocabulary: %s", ", ".join(f"{ja}={en}" if en else ja for ja, en in vocab))
     ctx.glossary = vocab
-    if vocab:
-        log.info("vocabulary: %s", ", ".join(f"{ja}={en}" if en else ja for ja, en in vocab))
 
     log.info("== 4/6 transcribing the streamer")
     tag = "" if not args.range else f"-{round(span[0])}-{round(span[1])}"
@@ -378,7 +393,7 @@ def streamer_subs(work, stream, job, args, span, timeline, episodes, layout) -> 
         write_json(asr_file, segments)
     lines = asr.lines_from_segments(segments)
 
-    log.info("== 5/6 translating (%s)", args.translator)
+    log.info("== 5/6 translating (%s)", translator.name if english else "none, Japanese subs")
     tr_file = work / f"translation-{translator.name}-{_key(lines, translator.cache_key(), vocab)}.json"
     if tr_file.exists():
         texts = read_json(tr_file)
@@ -389,7 +404,7 @@ def streamer_subs(work, stream, job, args, span, timeline, episodes, layout) -> 
     return "vtuber.ass"
 
 
-def auto_vocab(work, title, episodes, ctx) -> list[tuple[str, str]]:
+def auto_vocab(work, title, episodes, ctx, model=None) -> list[tuple[str, str]]:
     """The anime's names and terms, listed by Claude Code from its English subs. Optional:
     without a working `claude` login this logs a warning and returns nothing."""
     from .translate import ClaudeCodeTranslator
@@ -400,7 +415,7 @@ def auto_vocab(work, title, episodes, ctx) -> list[tuple[str, str]]:
             return []
         log.info("asking Claude Code for the anime's names and terms")
         try:
-            write_json(path, ClaudeCodeTranslator().suggest_vocab(ctx))
+            write_json(path, ClaudeCodeTranslator(model).suggest_vocab(ctx))
         except SystemExit as e:
             log.warning("automatic vocabulary skipped: %s", str(e).splitlines()[0])
             return []

@@ -22,7 +22,7 @@ def require_tools(*tools: str) -> None:
     if missing:
         raise SystemExit(
             f"missing required tools: {', '.join(missing)}. "
-            "Run through ./watchalong (Docker) or install them, see README."
+            "Run through ./watchalong.sh (Docker) or install them (README: Without Docker)."
         )
 
 

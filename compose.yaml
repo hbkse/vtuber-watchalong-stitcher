@@ -11,3 +11,4 @@ services:
 
 volumes:
   whisper-models:
+    name: watchalong-whisper-models   # fixed name, so renaming the repo folder keeps the model

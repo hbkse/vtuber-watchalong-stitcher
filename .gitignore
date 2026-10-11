@@ -6,3 +6,7 @@ __pycache__/
 build/
 .DS_Store
 .pytest_cache/
+.venv/
+# your own job files (see example-job.txt)
+jobs/*
+!jobs/.gitkeep

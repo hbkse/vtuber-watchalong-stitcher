@@ -9,7 +9,6 @@ The API-backed providers are stubs to fill in.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -34,6 +33,10 @@ class TranslationContext:
 
 class Translator:
     name = "base"
+    implemented = True
+
+    def __init__(self, model: str | None = None):
+        self.model = model  # provider-specific model name; None = the provider's default
 
     def cache_key(self) -> str:
         """Anything that changes the output (model, prompt), so stale caches aren't reused."""
@@ -73,10 +76,10 @@ class ClaudeCodeTranslator(Translator):
     parallel = 4
     attempts = 3
 
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         if not shutil.which("claude"):
             raise SystemExit("the claude-code translator needs the `claude` CLI on PATH")
-        self.model = os.environ.get("WATCHALONG_CLAUDE_MODEL")  # default: the CLI's default
+        super().__init__(model)  # sonnet, opus, or a full model name; None = the CLI's default
 
     def cache_key(self):
         return f"{self.name}|{self.model}|{_SYSTEM}|{self.batch}|{self.overlap}"
@@ -172,12 +175,14 @@ of {"ja": "...", "en": "..."} objects."""
 
 
 class _NotImplementedTranslator(Translator):
+    """Placeholders: not offered on the command line until implemented."""
+    implemented = False
     env_key = ""
 
     def translate(self, lines, context):
         raise NotImplementedError(
             f"the '{self.name}' translator is a placeholder and isn't implemented yet "
-            f"(it will read {self.env_key} from .env). Use --translator none for now.")
+            f"(it will read {self.env_key} from .env). Use --translator claude-code.")
 
 
 class AnthropicTranslator(_NotImplementedTranslator):
@@ -200,8 +205,8 @@ TRANSLATORS: dict[str, type[Translator]] = {
 }
 
 
-def get_translator(name: str) -> Translator:
-    return TRANSLATORS[name]()
+def get_translator(name: str, model: str | None = None) -> Translator:
+    return TRANSLATORS[name](model)
 
 
 _TAG = re.compile(r"\{[^}]*\}")

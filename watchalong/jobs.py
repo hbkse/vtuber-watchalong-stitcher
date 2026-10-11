@@ -26,6 +26,7 @@ are relative to the job file. Lines starting with # are comments.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,6 +60,9 @@ def resolve_source(value: str, base: Path) -> str:
     """URLs and magnets pass through; local paths get ~ expanded and are made absolute."""
     if _REMOTE.match(value):
         return value
+    host_home = os.environ.get("WATCHALONG_HOST_HOME")  # set by watchalong.sh: ~ is the user's
+    if host_home and (value == "~" or value.startswith("~/")):  # home, not the container's
+        value = host_home + value[1:]
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = base / path
