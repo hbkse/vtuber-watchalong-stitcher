@@ -1,0 +1,13 @@
+services:
+  watchalong:
+    build: .
+    image: watchalong:latest
+    volumes:
+      - ./data:/data                                   # downloads, cache, output
+      - whisper-models:/root/.cache/huggingface        # speech model, downloaded once
+    env_file:
+      - path: .env
+        required: false
+
+volumes:
+  whisper-models:

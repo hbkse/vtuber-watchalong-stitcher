@@ -1,0 +1,24 @@
+[project]
+name = "watchalong"
+version = "0.1.0"
+description = "Combine a VTuber watchalong stream with the anime being watched, synced and subtitled."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # unpinned upper bound on purpose: YouTube changes often, rebuild to pick up fixes
+    "yt-dlp[default]>=2026.8.19",
+    "faster-whisper>=1.1.0",
+    "pytesseract>=0.3.13",
+    "pillow>=10.4",
+    "numpy>=1.26",
+]
+
+[project.scripts]
+watchalong = "watchalong.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["watchalong*"]
